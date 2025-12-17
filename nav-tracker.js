@@ -97,27 +97,16 @@ function getNAVAndAnalyze() {
   });
 
   // ======= HOLIDAY CONFIGURATION =======
-  // Indian market holidays for 2025
-  const indianHolidays = [
-    "2025-01-26", // Republic Day
-    "2025-03-29", // Good Friday
-    "2025-04-14", // Dr. Ambedkar Jayanti
-    "2025-05-01", // Maharashtra Day
-    "2025-08-15", // Independence Day
-    "2025-10-02", // Gandhi Jayanti
-    "2025-10-24", // Dussehra
-    "2025-12-25"  // Christmas
-  ];
+  // Holidays are now managed in holidays.gs file
+  // Reference the centralized holiday list
 
   /**
    * Checks if a given date is a weekend or a defined Indian holiday.
    * @param {Date} date - The date to check.
    * @returns {boolean} True if it's a weekend or holiday, false otherwise.
    */
-  function isWeekendOrHoliday(date) {
-    const day = date.getDay(); // 0 for Sunday, 6 for Saturday
-    const APACYYYYMMDD = Utilities.formatDate(date, "GMT+5:30", "yyyy-MM-dd"); // FIX: Added space here
-    return day === 0 || day === 6 || indianHolidays.includes(APACYYYYMMDD);
+  function isWeekendOrHolidayLocal(date) {
+    return isWeekendOrHoliday(date); // Use the centralized function from holidays.gs
   }
 
   let rawNavData = null;
@@ -128,7 +117,7 @@ function getNAVAndAnalyze() {
   for (let i = 1; i <= 5; i++) {
     const dateToFetch = new Date();
     dateToFetch.setDate(dateToFetch.getDate() - i); // Go back 'i' days
-    if (isWeekendOrHoliday(dateToFetch)) continue; // Skip weekends and holidays
+    if (isWeekendOrHolidayLocal(dateToFetch)) continue; // Skip weekends and holidays
 
     const formattedDate = Utilities.formatDate(dateToFetch, "GMT+5:30", "dd-MMM-yyyy");
     const url = `https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx?frmdt=${formattedDate}`;
@@ -196,15 +185,106 @@ function getNAVAndAnalyze() {
   const numAlertCols = fundNames.length;
   newNavRow.push(...Array(numMACols + numAlertCols).fill("")); // Removed numLumpCols
 
+  // Define column indices early for N/A checking
+  const navStartIdx = 1; // After Date column
+
   // Append the new row to the sheet
   sheet.appendRow(newNavRow);
+
+  // Check if any fund has N/A values for this date
+  let hasNAValues = false;
+  for (let i = 0; i < fundNames.length; i++) {
+    if (newNavRow[navStartIdx + i] === "N/A") {
+      hasNAValues = true;
+      Logger.log(`⚠️ N/A detected for ${fundNames[i]}`);
+    }
+  }
+
+  // If N/A values found, remove the incomplete row and retry with earlier data
+  if (hasNAValues) {
+    Logger.log(`🔄 Incomplete data detected. Attempting to fetch from earlier dates...`);
+    sheet.deleteRow(sheet.getLastRow()); // Remove the incomplete row
+    
+    // Retry fetching from up to 10 days back to get complete data
+    for (let retryI = i + 1; retryI <= 10; retryI++) {
+      const dateToRetry = new Date();
+      dateToRetry.setDate(dateToRetry.getDate() - retryI);
+      if (isWeekendOrHoliday(dateToRetry)) continue;
+
+      const formattedRetryDate = Utilities.formatDate(dateToRetry, "GMT+5:30", "dd-MMM-yyyy");
+      const retryUrl = `https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx?frmdt=${formattedRetryDate}`;
+
+      try {
+        const retryResponse = UrlFetchApp.fetch(retryUrl, { muteHttpExceptions: true });
+        const retryContent = retryResponse.getContentText();
+
+        if (retryResponse.getResponseCode() === 200 && retryContent && !retryContent.includes("No data found")) {
+          Logger.log(`✅ Retrying with data from ${formattedRetryDate}`);
+          rawNavData = retryContent.split("\n");
+          fetchedDate = dateToRetry;
+          
+          // Rebuild the NAV row with retry data
+          const retryNavRow = [fetchedDate];
+          let completeData = true;
+          
+          fundNames.forEach(fund => {
+            const code = fundsToTrack[fund];
+            const line = rawNavData.find(l => l.includes(code + ";"));
+            let nav = NaN;
+            
+            if (line) {
+              const parts = line.split(";");
+              for (let j = 2; j < Math.min(parts.length, 10); j++) {
+                const candidate = parseFloat(parts[j]);
+                if (!isNaN(candidate) && candidate > 0) {
+                  nav = candidate;
+                  break;
+                }
+              }
+              if (isNaN(nav)) {
+                nav = parseFloat(parts[parts.length - 1]);
+              }
+            }
+            
+            if (isNaN(nav)) {
+              completeData = false;
+            }
+            retryNavRow.push(isNaN(nav) ? "N/A" : nav);
+          });
+
+          // Only proceed if we got complete data
+          if (completeData) {
+            // Check for duplicate entry
+            const retryFormattedDate = Utilities.formatDate(fetchedDate, "GMT+5:30", "yyyy-MM-dd");
+            const dataRange2 = sheet.getLastRow() > 1 ? 
+              sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
+            const existingDates2 = dataRange2.map(row => Utilities.formatDate(new Date(row[0]), "GMT+5:30", "yyyy-MM-dd"));
+            
+            if (!existingDates2.includes(retryFormattedDate)) {
+              // Add placeholders for MAs and Alerts
+              retryNavRow.push(...Array(numMACols + numAlertCols).fill(""));
+              sheet.appendRow(retryNavRow);
+              newNavRow = retryNavRow; // Update reference for subsequent processing
+              Logger.log(`✅ Successfully inserted complete data from ${formattedRetryDate}`);
+              break;
+            } else {
+              Logger.log(`⚠️ Data from ${formattedRetryDate} already exists. Skipping.`);
+            }
+          } else {
+            Logger.log(`⚠️ Data from ${formattedRetryDate} still has N/A values. Retrying...`);
+          }
+        }
+      } catch (e) {
+        Logger.log(`❌ Retry failed for ${formattedRetryDate}: ${e.message}`);
+      }
+    }
+  }
 
   // --- Calculate Moving Averages and Alerts ---
   // Re-read dataRange including the newly appended row for MA calculations
   dataRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
 
   // Calculate column indices for data types
-  const navStartIdx = 1; // After Date column
   const maStartIdx = navStartIdx + fundNames.length; // After NAV columns
   const ma30StartIdx = maStartIdx;
   const ma50StartIdx = ma30StartIdx + fundNames.length;
