@@ -15,7 +15,7 @@ function getNAVAndAnalyze() {
 
   // Validate sheet exists
   if (!sheet) {
-    SpreadsheetApp.getUi().alert(`Sheet "${sheetName}" not found. Please create it.`);
+    Logger.log(`❌ Sheet "${sheetName}" not found. Please create it.`);
     return;
   }
 
@@ -35,7 +35,7 @@ function getNAVAndAnalyze() {
 
   // Check if the sheet exists
   if (!sheet) {
-    SpreadsheetApp.getUi().alert(`Sheet "${sheetName}" not found. Please create it.`);
+    Logger.log(`❌ Sheet "${sheetName}" not found. Please create it.`);
     return;
   }
 
@@ -142,7 +142,7 @@ function getNAVAndAnalyze() {
 
   // If no data was successfully fetched, alert and exit
   if (!rawNavData) {
-    SpreadsheetApp.getUi().alert("Failed to fetch NAV data for the last 5 trading days. Please try again later.");
+    Logger.log("❌ Failed to fetch NAV data for the last 5 trading days. Please try again later.");
     return;
   }
 

@@ -8,7 +8,7 @@ function fillNAData() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
 
   if (!sheet) {
-    SpreadsheetApp.getUi().alert(`Sheet "${sheetName}" not found.`);
+    Logger.log(`❌ Sheet "${sheetName}" not found.`);
     return;
   }
 
@@ -158,8 +158,8 @@ function fillNAData() {
   Logger.log(`${"=".repeat(60)}\n`);
 
   if (totalUpdates > 0) {
-    SpreadsheetApp.getUi().alert(`✅ Successfully updated ${totalUpdates} N/A entries across all funds!`);
+    Logger.log(`✅ Successfully updated ${totalUpdates} N/A entries across all funds!`);
   } else {
-    SpreadsheetApp.getUi().alert("✅ No N/A entries found. All data is complete!");
+    Logger.log("✅ No N/A entries found. All data is complete!");
   }
 }
